@@ -95,6 +95,9 @@ const char APPARCH_PATH[] = "ApplicationArchives";
 char *udid = NULL;
 char *options = NULL;
 char *appid = NULL;
+size_t app_total_size = 0;
+size_t amount_total_size = 0;
+int progress = 0;
 
 enum cmd_mode {
 	CMD_NONE = 0,
@@ -599,6 +602,14 @@ static int afc_upload_file(afc_client_t afc, const char* filename, const char* d
 				return -1;
 			}
 		}
+		amount_total_size += amount;
+		if(app_total_size > 0) {
+			int current_progress = (int)(amount_total_size * 100.0f / app_total_size);
+			if(current_progress != progress) {
+				progress = current_progress;
+                fprintf(stdout, "INSTALL PROCESS %d%%\n", progress);
+            }
+		}
 	} while (amount > 0);
 
 	afc_file_close(afc, af);
@@ -653,6 +664,35 @@ static void afc_upload_dir(afc_client_t afc, const char* path, const char* afcpa
 		}
 		closedir(dir);
 	}
+}
+
+static size_t get_dir_size(const char* path) {
+	size_t total_size = 0;
+	DIR *dir = opendir(path);
+	if (dir) {
+		struct dirent* ep;
+		while ((ep = readdir(dir))) {
+			if ((strcmp(ep->d_name, ".") == 0) || (strcmp(ep->d_name, "..") == 0)) {
+				continue;
+			}
+			char *fpath = (char*)malloc(strlen(path)+1+strlen(ep->d_name)+1);
+
+			struct stat st;
+
+			strcpy(fpath, path);
+			strcat(fpath, "/");
+			strcat(fpath, ep->d_name);
+
+			if ((stat(fpath, &st) == 0) && S_ISDIR(st.st_mode)) {
+				total_size += get_dir_size(fpath);
+			} else {
+				total_size += st.st_size;
+			}
+			free(fpath);
+		}
+		closedir(dir);
+	}
+	return total_size;
 }
 
 int main(int argc, char **argv)
@@ -992,6 +1032,7 @@ run_again:
 			}
 
 			printf("Uploading %s package contents... ", basename(appid));
+			app_total_size = get_dir_size(appid);
 			afc_upload_dir(afc, appid, pkgname);
 			printf("DONE.\n");
 
